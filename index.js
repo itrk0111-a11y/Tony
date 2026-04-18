@@ -132,7 +132,7 @@ service.on('groupMessage', async (message) => {
             // إرسال الإجابة بعد 5 ثوانٍ واستئناف الأوامر
             if (answer !== null) {
                 setTimeout(async () => {
-                    await service.messaging.sendGroupMessage(message.targetGroupId, `!${answer}`);
+                    await service.messaging.sendGroupMessage(message.targetGroupId, `#${answer}`);
                     setTimeout(() => sendRoutineCommands(), 2000);
                 }, 5000);
             }
