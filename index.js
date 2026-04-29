@@ -46,7 +46,7 @@ service.on('groupMessage', async (message) => {
         if (!isTargetGroup) return;
 
         const content = message.body;
-        if (content.includes("أوكسجينه. ")) {
+        if (content.includes("فزآعنا")) {
     return; 
 }
 
