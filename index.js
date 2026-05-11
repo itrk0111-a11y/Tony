@@ -48,7 +48,7 @@ service.on('groupMessage', async (message) => {
         const content = message.body;
 
         // --- التعديل: قائمة الأسماء التي يجب تجاهلها تماماً ---
-        const ignoredNames = ["فزآعنا", "أوكسجينه"];
+        const ignoredNames = ["اونرنا", "أوكسجينه"];
         if (ignoredNames.some(name => content.includes(name))) {
             return; // الخروج من الوظيفة وعدم الرد
         }
