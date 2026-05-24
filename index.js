@@ -1,53 +1,54 @@
 import wolfjs from 'wolf.js';
 import axios from 'axios';
 import Tesseract from 'tesseract.js';
+import sharp from 'sharp'; // إضافة مكتبة المعالجة
 
 const { WOLF } = wolfjs;
 const service = new WOLF();
 
-// دالة قراءة الصورة مجاناً وبدون API
 async function solveCaptchaLocally(imageUrl) {
     try {
-        console.log("🔍 جاري معالجة الصورة محلياً...");
-        
-        // قراءة الصورة باستخدام Tesseract
-        const { data: { text } } = await Tesseract.recognize(imageUrl, 'eng', {
-            logger: m => console.log(m) // اختياري: لمتابعة التقدم في السجلات
+        // 1. تحميل الصورة ومعالجتها بـ Sharp (تحويلها لرمادي + زيادة التباين)
+        const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+        const processedImage = await sharp(response.data)
+            .grayscale() // تحويل لرمادي
+            .threshold(128) // تحويل لأبيض وأسود صافي (Thresholding)
+            .toBuffer();
+
+        // 2. القراءة باستخدام Tesseract مع إعدادات صارمة
+        const { data: { text } } = await Tesseract.recognize(processedImage, 'eng', {
+            // إعدادات إضافية لزيادة الدقة
+            tessedit_char_whitelist: '0123456789', // لا تبحث إلا عن هذه الأرقام
+            tessedit_pageseg_mode: '7', // معاملة الصورة كسطر واحد من النص
         });
 
-        // تنظيف النص: نأخذ الأرقام فقط ونحذف أي رموز أخرى
         const cleanText = text.replace(/[^0-9]/g, '');
         return cleanText.trim();
     } catch (err) {
-        console.error("❌ خطأ في القراءة:", err.message);
+        console.error("❌ خطأ في المعالجة:", err.message);
         return null;
     }
 }
 
 service.on('groupMessage', async (message) => {
-    // الفلتر للمجموعة المطلوبة فقط
     if (message.targetGroupId !== 81889058) return;
 
     let imageUrl = null;
-    
-    // التقاط الصورة
     if (message.body && message.body.startsWith('http')) imageUrl = message.body;
     else if (message.attachments && message.attachments.length > 0) imageUrl = message.attachments[0].link;
 
     if (imageUrl) {
-        console.log(`✅ صورة مكتشفة، جاري التحليل المحلي...`);
+        console.log(`✅ تم التقاط الصورة، جاري المعالجة...`);
         const solution = await solveCaptchaLocally(imageUrl);
         
-        // التحقق أن الحل مكون من أرقام (مثلاً طوله 4)
+        // التحقق من الحل (يجب أن يكون 4 أرقام على الأقل)
         if (solution && solution.length >= 4) {
-            console.log(`🔑 الحل المستخرج محلياً: ${solution}`);
+            console.log(`🔑 الحل المستخرج: ${solution}`);
             await service.messaging.sendGroupMessage(message.targetGroupId, `#${solution}`);
         } else {
-            console.log("⚠️ فشل في قراءة الأرقام من الصورة.");
+            console.log("⚠️ الصورة صعبة جداً ولم يتمكن المحرك من قراءة الأرقام.");
         }
     }
 });
-
-service.on('ready', () => console.log("🚀 البوت متصل (الخطة المجانية نشطة)!"));
 
 service.login(process.env.U_MAIL, process.env.U_PASS);
