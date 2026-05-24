@@ -7,9 +7,10 @@ const service = new WOLF();
 
 // الإعدادات
 const settings = {
-    taskGroupId: 81889058,
+    // ضع هنا أرقام القنوات التي تريد أن يعمل فيها البوت فقط
+    allowedGroupIds: [ 81889058], 
     verificationGroupId: 9969,
-    apiKey: process.env.API_KEY || 'K83171079488957' // مفتاحك
+    apiKey: process.env.API_KEY || 'K83171079488957'
 };
 
 // دالة الحل عبر API
@@ -27,37 +28,37 @@ async function solveCaptcha(imageUrl) {
 }
 
 service.on('groupMessage', async (message) => {
-    // 1. طباعة كامل بيانات الرسالة في السجلات (Logs) لكي نكتشف مكان الصورة
-    console.log("--- تفاصيل الرسالة المستلمة ---");
-    console.log(JSON.stringify(message, null, 2));
+    // 1. التصفية: إذا لم تكن القناة ضمن القائمة المسموحة، توقف فوراً
+    if (!settings.allowedGroupIds.includes(message.targetGroupId)) {
+        return;
+    }
 
-    // 2. محاولات استخراج رابط الصورة (بناءً على هياكل WOLF المختلفة)
+    // 2. استخراج رابط الصورة بناءً على السجلات التي أرسلتها
     let imageUrl = null;
 
-    // الطريقة الأولى: المرفقات التقليدية
-    if (message.attachments && message.attachments[0]) {
-        imageUrl = message.attachments[0].link || message.attachments[0].url;
-    }
-    
-    // الطريقة الثانية: إذا كانت الصورة من نوع ميديا
-    if (!imageUrl && message.media) {
-        imageUrl = message.media.url || message.media.link;
+    // السجلات تظهر أن الرابط يأتي في body عندما يكون النوع text/image_link
+    if (message.type === 'text/image_link') {
+        imageUrl = message.body;
+    } 
+    // احتياطاً: إذا جاءت الصورة كمرفق عادي
+    else if (message.attachments && message.attachments.length > 0) {
+        imageUrl = message.attachments[0].link;
     }
 
+    // 3. المعالجة إذا وجدنا رابطاً
     if (imageUrl) {
-        console.log("✅ تم العثور على رابط صورة:", imageUrl);
+        console.log(`✅ تم اكتشاف صورة في القناة ${message.targetGroupId}، جاري الحل...`);
         const solution = await solveCaptcha(imageUrl);
+        
         if (solution) {
             console.log("🔑 الحل المستخرج:", solution);
             await service.messaging.sendGroupMessage(settings.verificationGroupId, `#${solution}`);
         }
-    } else {
-        console.log("❌ لم يتم العثور على رابط صورة في هذه الرسالة.");
     }
 });
 
 service.on('ready', async () => {
-    console.log("🚀 البوت متصل ويراقب القناة...");
+    console.log("🚀 البوت يعمل الآن ويراقب القنوات المحددة فقط!");
 });
 
 service.login(process.env.U_MAIL, process.env.U_PASS);
