@@ -6,7 +6,6 @@
   "dependencies": {
     "wolf.js": "latest",
     "axios": "latest",
-    "dotenv": "latest",
-    "@google/generative-ai": "latest"
+    "tesseract.js": "latest"
   }
 }
