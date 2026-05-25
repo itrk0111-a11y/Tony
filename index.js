@@ -6,16 +6,18 @@ import { createWorker } from 'tesseract.js';
 const { WOLF } = wolfjs;
 const client = new WOLF();
 
+// الإعدادات
 const TARGET_USER_ID = 51660277;
 const CHANNEL_ID = 81889058;
 const INTERVAL_MS = 63000;
 
 client.on('ready', async () => {
-    console.log("🚀 البوت متصل ومستعد!");
+    console.log("🚀 البوت متصل ومستعد! (يتجاهل النصوص ويركز على الصور فقط)");
     await client.group.joinById(CHANNEL_ID);
     startAutomation();
 });
 
+// الأتمتة (لا تتأثر بالرسائل)
 async function startAutomation() {
     setInterval(async () => {
         try {
@@ -29,12 +31,15 @@ async function startAutomation() {
 }
 
 client.on('groupMessage', async (message) => {
-    // فلتر القناة والمستخدم
+    // 1. التأكد من القناة والمستخدم
     if (message.sourceSubscriberId != TARGET_USER_ID || message.targetGroupId != CHANNEL_ID) return;
 
-    // فلتر الرسائل النصية (لا يعالج إلا الصور)
-    if (!message.attachments || message.attachments.length === 0) return;
+    // 2. الفلتر الصارم: إذا لم تكن هناك مرفقات، تجاهل الرسالة تماماً ولا تفعل شيئاً
+    if (!message.attachments || message.attachments.length === 0) {
+        return; // خروج صامت (لا يظهر خطأ)
+    }
 
+    // 3. إذا وصلنا هنا، يعني أن هناك صورة
     const imageUrl = message.attachments[0].link;
     if (!imageUrl) return;
 
@@ -54,10 +59,12 @@ client.on('groupMessage', async (message) => {
             console.log(`✅ تم الإرسال: #${code}`);
         }
     } catch (err) {
-        console.error("⚠️ خطأ في معالجة المرفق:", err.message);
+        // خطأ صامت في معالجة الصور
+        console.error("⚠️ خطأ في معالجة الصورة:", err.message);
     }
 });
 
+// دوال المعالجة
 async function isCaptchaImage(buffer) {
     try {
         const headerBuffer = await sharp(buffer)
