@@ -14,8 +14,12 @@ jobs:
         node-version: '20'
         
     - name: Install dependencies
-      # قمنا بتغيير npm ci إلى npm install
       run: npm install
         
     - name: Run Bot
+      env:
+        # هنا نربط الـ Secrets الموجودة في إعدادات GitHub بالمتغيرات
+        U_MAIL: ${{ secrets.U_MAIL }}
+        U_PASS: ${{ secrets.U_PASS }}
       run: npm start
+
