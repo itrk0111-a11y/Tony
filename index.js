@@ -2,10 +2,6 @@ import 'dotenv/config';
 import wolfjs from 'wolf.js';
 import sharp from 'sharp';
 import { createWorker } from 'tesseract.js';
-import { createRequire } from 'module';
-
-const require = createRequire(import.meta.url);
-const Jimp = require('jimp');
 
 const { WOLF } = wolfjs;
 const client = new WOLF();
@@ -23,58 +19,62 @@ client.on('groupMessage', async (message) => {
         const imageUrl = message.body || (message.attachments && message.attachments[0]?.link);
 
         if (imageUrl && (imageUrl.endsWith('.jpg') || imageUrl.endsWith('.jpeg') || imageUrl.endsWith('.png'))) {
-            console.log("📸 اكتشفت صورة! جاري عزل البطاقة المطلوبة...");
+            console.log("📸 اكتشفت صورة! جاري المعالجة بـ Sharp...");
             try {
-                // معالجة ذكية: عزل البطاقة المطلوبة وقراءتها
                 const code = await solveCaptcha(imageUrl);
                 console.log("🎯 الرمز المستخرج هو:", code);
-                
-                // يمكنك تفعيل الرد هنا إذا أردت
                 // await client.messaging.sendGroupMessage(CHANNEL_ID, `#${code}`);
             } catch (err) {
-                console.error("❌ خطأ:", err.message);
+                console.error("❌ خطأ أثناء المعالجة:", err.message);
             }
         }
     }
 });
 
 async function solveCaptcha(url) {
-    // 1. تحميل الصورة الأصلية باستخدام Jimp للتحليل
-    const image = await Jimp.read(url);
-    const { width, height } = image.bitmap;
+    // 1. تحميل الصورة
+    const response = await fetch(url);
+    const buffer = Buffer.from(await response.arrayBuffer());
 
-    // 2. البحث عن الإطار الأصفر المتقطع (تحديد موقع البطاقة)
-    let minX = width, minY = height, maxX = 0, maxY = 0;
+    // 2. معالجة الصورة لاستخراج البيانات (Pixels)
+    const image = sharp(buffer);
+    const { data, info } = await image.raw().ensureAlpha().toBuffer({ resolveWithObject: true });
+
+    let minX = info.width, minY = info.height, maxX = 0, maxY = 0;
     let found = false;
 
-    image.scan(0, 0, width, height, (x, y, idx) => {
-        const r = image.bitmap.data[idx + 0];
-        const g = image.bitmap.data[idx + 1];
-        const b = image.bitmap.data[idx + 2];
+    // 3. مسح البكسلات للبحث عن اللون الأصفر (الإطار)
+    for (let y = 0; y < info.height; y++) {
+        for (let x = 0; x < info.width; x++) {
+            const idx = (y * info.width + x) * 4;
+            const r = data[idx];
+            const g = data[idx + 1];
+            const b = data[idx + 2];
 
-        // اكتشاف اللون الأصفر الخاص بالإطار
-        if (r > 200 && g > 200 && b < 100) {
-            minX = Math.min(minX, x);
-            minY = Math.min(minY, y);
-            maxX = Math.max(maxX, x);
-            maxY = Math.max(maxY, y);
-            found = true;
+            // شرط اللون الأصفر (الإطار المنقط)
+            if (r > 200 && g > 200 && b < 100) {
+                minX = Math.min(minX, x);
+                minY = Math.min(minY, y);
+                maxX = Math.max(maxX, x);
+                maxY = Math.max(maxY, y);
+                found = true;
+            }
         }
-    });
+    }
 
-    if (!found) throw new Error("لم يتم العثور على البطاقة المميزة!");
+    if (!found) throw new Error("لم يتم العثور على الإطار الأصفر!");
 
-    // 3. قص المنطقة المحددة بدقة
+    // 4. قص الصورة بناءً على الإحداثيات المكتشفة
     const cropWidth = maxX - minX;
     const cropHeight = maxY - minY;
-    
-    const croppedBuffer = await sharp(await (await fetch(url)).arrayBuffer())
+
+    const croppedBuffer = await sharp(buffer)
         .extract({ left: minX + 5, top: minY + 5, width: cropWidth - 10, height: cropHeight - 10 })
         .greyscale()
         .threshold(150)
         .toBuffer();
 
-    // 4. قراءة النص من المنطقة المقصوصة فقط
+    // 5. قراءة النص
     const worker = await createWorker('eng+ara');
     const { data: { text } } = await worker.recognize(croppedBuffer);
     await worker.terminate();
