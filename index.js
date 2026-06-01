@@ -6,14 +6,14 @@ import { createWorker } from 'tesseract.js';
 const { WOLF } = wolfjs;
 const client = new WOLF();
 
-// --- دالة Sleep عالمية لمنع التداخل ---
+// --- دالة Sleep عالمية ---
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // --- الإعدادات ---
 const TARGET_USER_ID = 76023604;
 const CHANNEL_TASKS = 224;
 const CHANNEL_ALLIANCE = 224;
-const TARGET_PLAYER_NAME = 'cat';
+const TARGET_PLAYER_NAME = 'cat'; // الاسم المراد مراقبته
 
 // الحالة العالمية
 let botState = { 
@@ -28,7 +28,7 @@ let botState = {
 let lastCommandTime = 0;
 
 client.on('ready', async () => {
-    console.log(`🚀 البوت يعمل الآن بكامل المزايا.`);
+    console.log(`🚀 البوت يعمل ومستعد للمراقبة.`);
     await client.group.joinById(CHANNEL_TASKS);
     await client.group.joinById(CHANNEL_ALLIANCE);
     
@@ -42,13 +42,13 @@ async function startStatusLoop() {
     setTimeout(startStatusLoop, 30 * 60 * 1000);
 }
 
-// 2. حلقة المهام (مع تأخير ثانية بين الأوامر)
+// 2. حلقة المهام (مع تأخير ثانية لمنع السبام)
 async function startTaskLoop() {
     try {
         lastCommandTime = Date.now();
         
         await client.messaging.sendGroupMessage(CHANNEL_TASKS, '!مد مهام');
-        await sleep(1000); // تأخير ثانية لمنع التداخل
+        await sleep(1000); // تأخير ثانية
         await client.messaging.sendGroupMessage(CHANNEL_ALLIANCE, '!مد تحالف ايداع كل');
         
         await manageBoxes();
@@ -61,21 +61,21 @@ async function startTaskLoop() {
     }
 }
 
-// 3. إدارة الصناديق (نظام Safe Side - التوقف عند 40 نقطة)
+// 3. إدارة الصناديق (المنطق الذكي)
 async function manageBoxes() {
-    // تفعيل الضمان
+    // تفعيل الضمان إذا كان جاهزاً ولا يوجد جهاز زمني
     if (botState.isReady && !botState.hasTimeDevice) {
         await client.messaging.sendGroupMessage(CHANNEL_TASKS, '!مد صندوق ضمان وقت');
         await sleep(3000);
         return;
     }
 
-    // وضع الأمان: إذا كان هناك زمني أو جاهز أو وصلنا لـ 40 نقطة، توقف
+    // وضع الأمان: إذا كان هناك جهاز زمني يعمل، أو كان البوت جاهزاً، أو وصلت لـ 40 نقطة، توقف!
     if (botState.hasTimeDevice || botState.isReady || botState.points >= 40) {
         return; 
     }
 
-    // فتح الصناديق (الأولوية للذهبي)
+    // فتح الصناديق
     if (botState.gold > 0) {
         await client.messaging.sendGroupMessage(CHANNEL_TASKS, '!مد صندوق فتح ذهبي');
         await sleep(3000);
@@ -88,7 +88,7 @@ async function manageBoxes() {
     }
 }
 
-// 4. معالجة الرسائل والكابتشا (فحص الفخوخ والتحقق)
+// 4. معالجة الرسائل (فلترة دقيقة)
 client.on('groupMessage', async (message) => {
     if (message.sourceSubscriberId != TARGET_USER_ID || message.type !== 'text/image_link') return;
 
@@ -96,22 +96,28 @@ client.on('groupMessage', async (message) => {
         const response = await fetch(message.body);
         const buffer = Buffer.from(await response.arrayBuffer());
 
-        // أ) التحقق من الكابتشا (الفخوخ)
+        // أ) هل هي كابتشا؟
         if (await isCaptchaByColor(buffer)) {
             if (Date.now() - lastCommandTime <= 4000) {
                 const name = await extractPlayerName(buffer);
                 const regex = new RegExp(`\\b${TARGET_PLAYER_NAME}\\b`, 'i');
                 
                 if (regex.test(name)) {
+                    console.log("⚠️ كابتشا مطلوبة لـ " + TARGET_PLAYER_NAME);
                     const code = await solveCaptcha(buffer);
                     if (code) await client.messaging.sendGroupMessage(message.targetGroupId, `#${code}`);
                 }
             }
         } 
-        // ب) تحديث الحالة
+        // ب) هل هي حالة؟ (مع التحقق من الاسم)
         else {
-            botState = await parseStatusImage(buffer);
-            console.log("📊 تحديث الحالة:", botState);
+            const newState = await parseStatusImage(buffer);
+            if (newState) {
+                botState = newState;
+                console.log("📊 تم تحديث الحالة:", botState);
+            } else {
+                console.log("🔍 تم تجاهل صورة: لا تطابق بيانات " + TARGET_PLAYER_NAME);
+            }
         }
     } catch (err) {
         console.error("خطأ في المعالجة:", err.message);
@@ -143,7 +149,6 @@ async function solveCaptcha(buffer) {
     const processed = await sharp(buffer).greyscale().threshold(180).toBuffer();
     const { data: { text } } = await worker.recognize(processed);
     await worker.terminate();
-    
     const digits = text.replace(/\D/g, ''); 
     return digits.length > 0 ? digits : null;
 }
@@ -152,6 +157,12 @@ async function parseStatusImage(buffer) {
     const worker = await createWorker('ara+eng');
     const { data: { text } } = await worker.recognize(buffer);
     await worker.terminate();
+    
+    // فلترة: لا تعالج إلا إذا كانت صورة حالة وتحمل اسم اللاعب
+    const nameRegex = new RegExp(`\\b${TARGET_PLAYER_NAME}\\b`, 'i');
+    if (!text.includes("نقاط الضمان") || !nameRegex.test(text)) {
+        return null; // صورة غير صالحة أو ليست للاعب المطلوب
+    }
     
     return {
         hasTimeDevice: text.includes("الجهاز الزمني"),
