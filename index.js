@@ -26,7 +26,7 @@ async function startAutomation() {
     // 1. مهمة الصندوق فتح كل 5 دقائق (300,000 مللي ثانية)
     setInterval(async () => {
         try {
-            await client.messaging.sendGroupMessage(CHANNEL_TASKS, '!مد صندوق فتح ذهبي ');
+            await client.messaging.sendGroupMessage(CHANNEL_TASKS, '!مد صندوق فتح ');
             console.log(`✅ تم إرسال "!مد صندوق فتح" تلقائياً`);
         } catch (err) {
             console.error("❌ خطأ في إرسال صندوق الفتح:", err.message);
@@ -59,7 +59,7 @@ async function startAutomation() {
 
             // 3. انتظار 64 ثانية للدورة التالية
             console.log("⏳ بانتظار 64 ثانية للبدء من جديد...");
-            await sleep(306000);
+            await sleep(64000);
 
         } catch (err) {
             console.error("❌ خطأ في الأتمتة:", err.message);
