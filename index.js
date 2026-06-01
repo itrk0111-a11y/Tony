@@ -2,6 +2,7 @@ import 'dotenv/config';
 import wolfjs from 'wolf.js';
 import sharp from 'sharp';
 import { createWorker } from 'tesseract.js';
+import fetch from 'node-fetch'; // تأكد من تثبيت node-fetch
 
 const { WOLF } = wolfjs;
 const client = new WOLF();
@@ -10,127 +11,145 @@ const client = new WOLF();
 const TARGET_USER_ID = 76023604;
 const CHANNEL_ID = 224;
 const TARGET_PLAYER_NAME = 'cat';
-let taskInterval = 306000; // القيمة الافتراضية
+let taskInterval = 306000; // الافتراضي 5 دقائق و 6 ثوانٍ
 
-// مصفوفة لتتبع حالة الانتظار للكابتشا
+// متغيرات الحالة
 const waitingStates = { [CHANNEL_ID]: { isWaiting: false, timer: null } };
 
-// تهيئة الـ Worker (لحل الكابتشا بسرعة)
+// تهيئة الـ Worker
 let worker = null;
 async function initWorker() {
     worker = await createWorker('eng+ara');
     await worker.setParameters({ tessedit_pageseg_mode: '7' });
+    console.log("🤖 تم تهيئة محرك التعرف على النصوص (Tesseract)");
 }
 
 client.on('ready', async () => {
-    console.log(`🚀 البوت متصل!`);
+    console.log(`🚀 البوت متصل! القناة: ${CHANNEL_ID}`);
     await initWorker();
     await client.group.joinById(CHANNEL_ID);
     
-    // بدء الحلقات
-    startCrateLoop();      // حلقة الصناديق
-    startAutomationLoop(); // حلقة المهام
+    // بدء المهام
+    startCrateLoop();
+    startAutomationLoop();
 });
 
-// --- حلقة الصناديق (كل 30 دقيقة) ---
+// 1. حلقة طلب الصناديق (كل 30 دقيقة)
 function startCrateLoop() {
-    client.messaging.sendGroupMessage(CHANNEL_ID, '!مد صندوق');
     setInterval(async () => {
         await client.messaging.sendGroupMessage(CHANNEL_ID, '!مد صندوق');
+        console.log("📦 تم إرسال طلب !مد صندوق");
     }, 30 * 60 * 1000);
 }
 
-// --- حلقة المهام الديناميكية ---
+// 2. حلقة المهام الديناميكية
 async function startAutomationLoop() {
     const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
     while (true) {
         try {
-            // تفعيل انتظار الكابتشا قبل إرسال المهام
+            // تفعيل حالة الانتظار قبل إرسال الأوامر
             setWaitingState(CHANNEL_ID, true);
             
             await client.messaging.sendGroupMessage(CHANNEL_ID, '!مد مهام');
             await sleep(2000);
             await client.messaging.sendGroupMessage(CHANNEL_ID, '!مد تحالف ايداع كل');
             
-            console.log(`✅ المهام مكتملة. الوضع الحالي: ${taskInterval === 60000 ? 'سريع (60 ثانية)' : 'عادي (306 ثانية)'}`);
+            console.log(`⏳ تم إرسال الأوامر. وضع السرعة الحالي: ${taskInterval === 60000 ? 'سريع (دقيقة)' : 'عادي (306 ثانية)'}`);
+            
             await sleep(taskInterval);
         } catch (err) {
-            console.error("❌ خطأ:", err.message);
+            console.error("❌ خطأ في الأتمتة:", err.message);
             await sleep(5000);
         }
     }
 }
 
+// 3. إدارة حالة الانتظار
 function setWaitingState(channelId, isActive) {
     if (waitingStates[channelId].timer) clearTimeout(waitingStates[channelId].timer);
     waitingStates[channelId].isWaiting = isActive;
+    // انتظار الكابتشا لمدة 15 ثانية فقط
     if (isActive) {
-        waitingStates[channelId].timer = setTimeout(() => { waitingStates[channelId].isWaiting = false; }, 10000);
+        waitingStates[channelId].timer = setTimeout(() => { 
+            waitingStates[channelId].isWaiting = false; 
+            console.log("⏲️ انتهى وقت انتظار الكابتشا.");
+        }, 15000);
     }
 }
 
-// --- معالجة الرسائل ---
+// 4. الاستماع للرسائل
 client.on('groupMessage', async (message) => {
     if (message.targetGroupId !== CHANNEL_ID || !message.body) return;
 
-    // 1. فحص رسالة الصناديق لتحديث السرعة
+    // تحديث سرعة المهام بناءً على الصناديق
     if (message.body.includes('حالة الصناديق')) {
-        updateSpeedLogic(message.body);
+        const isInactive = message.body.includes('الجهاز الزمني: غير نشط') || message.body.includes('الجهاز الزمني: —');
+        taskInterval = isInactive ? 306000 : 60000;
+        console.log(`⚡ تحديث السرعة بناءً على الصناديق: ${taskInterval === 60000 ? 'سريع' : 'عادي'}`);
     }
 
-    // 2. فحص الكابتشا (فقط إذا كان المستخدم المستهدف وأرسلنا الأمر للتو)
-    if (message.sourceSubscriberId == TARGET_USER_ID && message.type === 'text/image_link' && waitingStates[CHANNEL_ID].isWaiting) {
+    // معالجة الكابتشا
+    // تحقق من نوع الرسالة (تأكد من صيغة البوت التي تصل بها الصورة، غالباً image_link)
+    if (message.sourceSubscriberId == TARGET_USER_ID && (message.type === 'image' || message.type === 'text/image_link')) {
+        
+        if (!waitingStates[CHANNEL_ID].isWaiting) {
+            console.log("⏭️ تم تجاهل صورة: البوت ليس في حالة انتظار.");
+            return;
+        }
+
+        console.log("📸 استلمت صورة كابتشا، جاري المعالجة...");
+        
         try {
             const response = await fetch(message.body);
             const buffer = Buffer.from(await response.arrayBuffer());
-            
-            if (!(await isCaptchaByColor(buffer))) return;
 
+            // قراءة الاسم
             const name = await extractPlayerName(buffer);
+            console.log(`👤 الاسم المكتشف: ${name}`);
+
             if (name.toLowerCase().includes(TARGET_PLAYER_NAME.toLowerCase())) {
-                setWaitingState(CHANNEL_ID, false);
+                console.log("✅ الاسم يطابق، جاري استخراج الكود...");
                 const code = await solveCaptcha(buffer);
+                
                 if (code) {
+                    console.log(`🤖 تم استخراج الكود: #${code}`);
                     await client.messaging.sendGroupMessage(CHANNEL_ID, `#${code}`);
-                    console.log(`✅ تم حل الكابتشا: #${code}`);
+                    setWaitingState(CHANNEL_ID, false); // إيقاف الانتظار بعد الحل
+                } else {
+                    console.log("❌ تعذر قراءة الكود.");
                 }
+            } else {
+                console.log("⏭️ الاسم لا يطابق المستهدف.");
             }
         } catch (err) {
-            console.error("⚠️ خطأ في معالجة الكابتشا:", err.message);
+            console.error("⚠️ خطأ أثناء حل الكابتشا:", err.message);
         }
     }
 });
 
-// --- وظائف منطق السرعة ---
-function updateSpeedLogic(text) {
-    const isInactive = text.includes('الجهاز الزمني: غير نشط') || text.includes('الجهاز الزمني: —');
-    taskInterval = isInactive ? 306000 : 60000;
-    console.log(`⚡ تم تحديث التوقيت إلى: ${taskInterval / 1000} ثانية.`);
-}
-
-// --- وظائف الكابتشا ---
-async function isCaptchaByColor(buffer) {
-    const { data, info } = await sharp(buffer).raw().ensureAlpha().toBuffer({ resolveWithObject: true });
-    let redPixels = 0;
-    for (let i = 0; i < data.length; i += 4) {
-        if (data[i] > 120 && data[i] > (data[i + 1] + 30) && data[i] > (data[i + 2] + 30)) redPixels++;
-    }
-    return (redPixels / (info.width * info.height)) * 100 > 40;
-}
-
+// --- دوال التعرف على النصوص ---
 async function extractPlayerName(buffer) {
     try {
-        const processedBuffer = await sharp(buffer).greyscale().threshold(160).toBuffer();
-        const { data: { text } } = await worker.recognize(processedBuffer);
+        const { data: { text } } = await worker.recognize(buffer);
         const match = text.match(/اللاعب[:\s]+([^\n\r]+)/u);
-        return match ? match[1].trim() : "لم يتم العثور على اسم";
+        return match ? match[1].trim() : "غير معروف";
     } catch (e) { return "خطأ"; }
 }
 
 async function solveCaptcha(buffer) {
-    const processedBuffer = await sharp(buffer).greyscale().normalize().linear(1.5, -0.2).sharpen().toBuffer();
-    const { data: { text } } = await worker.recognize(processedBuffer);
-    return text.replace(/[^a-zA-Z0-9\u0621-\u064A]/g, '').trim();
+    try {
+        // تحسين جودة الصورة للحل
+        const processed = await sharp(buffer)
+            .resize(800)
+            .greyscale()
+            .threshold(150)
+            .toBuffer();
+            
+        const { data: { text } } = await worker.recognize(processed);
+        // استخراج أرقام وحروف فقط
+        const cleanCode = text.replace(/[^a-zA-Z0-9]/g, '').trim();
+        return cleanCode;
+    } catch (e) { return null; }
 }
 
 client.login(process.env.U_MAIL, process.env.U_PASS);
