@@ -34,6 +34,7 @@ async function startAutomation() {
             
             // طلب الحالة كل 30 دقيقة
             if (Date.now() - lastStatusRequestTime > 30 * 60 * 1000) {
+                console.log("🕒 طلب الحالة...");
                 await client.messaging.sendGroupMessage(CHANNEL_TASKS, '!مد حالة');
                 lastStatusRequestTime = Date.now();
                 await sleep(5000);
@@ -44,18 +45,19 @@ async function startAutomation() {
 }
 
 // --- معالجة الصور الذكية ---
-async function processAndReadImage(buffer, isNameCheck = false) {
-    // معالجة قوية جداً للصورة لجعل النص واضحاً (عتبة حادة)
-    const processedBuffer = await sharp(buffer)
-        .greyscale()
-        .normalize() // تحسين التباين
-        .threshold(128) // عتبة حادة جداً
-        .toBuffer();
+async function readImage(buffer, region = null) {
+    let pipeline = sharp(buffer).greyscale().normalize();
+    
+    if (region) {
+        pipeline = pipeline.extract(region);
+    }
+    
+    // تحسين التباين ليقرأ البوت النص الأسود على خلفية فاتحة
+    const processedBuffer = await pipeline.threshold(140).toBuffer();
 
     const worker = await createWorker('ara+eng');
     const { data: { text } } = await worker.recognize(processedBuffer);
     await worker.terminate();
-    
     return text;
 }
 
@@ -67,30 +69,36 @@ client.on('groupMessage', async (message) => {
         const response = await fetch(message.body);
         const buffer = Buffer.from(await response.arrayBuffer());
 
-        // 1. هل هي كابتشا؟
+        // 1. فحص الكابتشا (منطقك القديم)
         if (await isCaptchaByColor(buffer)) {
             const code = await solveCaptcha(buffer);
             if (code) await client.messaging.sendGroupMessage(message.targetGroupId, `#${code}`);
             return;
         }
 
-        // 2. تحليل النص من الصورة
-        const fullText = await processAndReadImage(buffer);
-        console.log("📝 [النص المقروء]:\n", fullText); // للتشخيص
+        // 2. التحقق من الاسم في الجزء العلوي (40% من الصورة)
+        const metadata = await sharp(buffer).metadata();
+        const nameText = await readImage(buffer, { 
+            left: 0, top: 0, width: Math.round(metadata.width * 0.7), height: Math.round(metadata.height * 0.4) 
+        });
+        
+        console.log(`[DEBUG NAME]: ${nameText.trim()}`); // شاهد ماذا يرى البوت هنا
 
-        // 3. التحقق من الاسم (الاسم يجب أن يكون موجوداً في النص)
-        if (!fullText.toLowerCase().includes(TARGET_PLAYER_NAME.toLowerCase())) {
-            console.log("⏭️ تجاهل: الاسم غير مطابق.");
-            return;
+        if (!nameText.toLowerCase().includes(TARGET_PLAYER_NAME.toLowerCase())) {
+            return; // لم يجد الاسم، توقف هنا
         }
 
-        // 4. استخراج البيانات (Regex مرن جداً)
-        console.log("✅ تم العثور على اللاعب، جاري التحليل...");
-        
+        console.log("✅ تم التعرف على الاسم! جاري تحليل الحالة...");
+
+        // 3. تحليل بيانات الحالة من الصورة كاملة
+        const fullText = await readImage(buffer);
+        console.log(`[DEBUG STATUS]: ${fullText.replace(/\n/g, ' ')}`);
+
         const timeMachine = fullText.match(/(?:الجهاز الزمني|الجهاز)[:\s]+([^\n\r]+)/u);
         const chests = fullText.match(/(?:الصناديق|صناديق)[:\s]+(\d+)/u);
-        const warranty = fullText.match(/(?:نقاط الضمان|ضمان)[:\s]+(\d+)\/(\d+)/u);
+        const warranty = fullText.match(/(?:نقاط الضمان|الضمان)[:\s]+(\d+)\/(\d+)/u);
 
+        console.log("📊 --- النتائج ---");
         console.log(`⏱️ الجهاز الزمني: ${timeMachine ? timeMachine[1].trim() : 'غير موجود'}`);
         console.log(`📦 عدد الصناديق: ${chests ? chests[1] : '0'}`);
         
@@ -98,12 +106,14 @@ client.on('groupMessage', async (message) => {
             const current = parseInt(warranty[1]);
             const total = parseInt(warranty[2]);
             console.log(`🛡️ نقاط الضمان: ${current}/${total} (${current >= total ? 'جاهز ✅' : 'غير جاهز ❌'})`);
+        } else {
+            console.log("🛡️ نقاط الضمان: لم يتم التعرف عليها");
         }
 
-    } catch (err) { console.error("⚠️ خطأ في المعالجة:", err.message); }
+    } catch (err) { console.error("⚠️ خطأ:", err.message); }
 });
 
-// --- دالة الكابتشا (كما في كودك الأصلي) ---
+// --- وظائف الكابتشا ---
 async function isCaptchaByColor(buffer) {
     const { data, info } = await sharp(buffer).raw().ensureAlpha().toBuffer({ resolveWithObject: true });
     let redPixels = 0;
