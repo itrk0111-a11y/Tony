@@ -6,6 +6,9 @@ import { createWorker } from 'tesseract.js';
 const { WOLF } = wolfjs;
 const client = new WOLF();
 
+// --- دالة Sleep عالمية لمنع التداخل ---
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 // --- الإعدادات ---
 const TARGET_USER_ID = 76023604;
 const CHANNEL_TASKS = 224;
@@ -39,12 +42,13 @@ async function startStatusLoop() {
     setTimeout(startStatusLoop, 30 * 60 * 1000);
 }
 
-// 2. حلقة المهام (ديناميكية 63ث / 306ث)
+// 2. حلقة المهام (مع تأخير ثانية بين الأوامر)
 async function startTaskLoop() {
     try {
         lastCommandTime = Date.now();
+        
         await client.messaging.sendGroupMessage(CHANNEL_TASKS, '!مد مهام');
-        await sleep(1500);
+        await sleep(1000); // تأخير ثانية لمنع التداخل
         await client.messaging.sendGroupMessage(CHANNEL_ALLIANCE, '!مد تحالف ايداع كل');
         
         await manageBoxes();
@@ -59,8 +63,6 @@ async function startTaskLoop() {
 
 // 3. إدارة الصناديق (نظام Safe Side - التوقف عند 40 نقطة)
 async function manageBoxes() {
-    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
     // تفعيل الضمان
     if (botState.isReady && !botState.hasTimeDevice) {
         await client.messaging.sendGroupMessage(CHANNEL_TASKS, '!مد صندوق ضمان وقت');
@@ -73,7 +75,7 @@ async function manageBoxes() {
         return; 
     }
 
-    // فتح الصناديق
+    // فتح الصناديق (الأولوية للذهبي)
     if (botState.gold > 0) {
         await client.messaging.sendGroupMessage(CHANNEL_TASKS, '!مد صندوق فتح ذهبي');
         await sleep(3000);
@@ -86,7 +88,7 @@ async function manageBoxes() {
     }
 }
 
-// 4. معالجة الرسائل
+// 4. معالجة الرسائل والكابتشا (فحص الفخوخ والتحقق)
 client.on('groupMessage', async (message) => {
     if (message.sourceSubscriberId != TARGET_USER_ID || message.type !== 'text/image_link') return;
 
@@ -94,6 +96,7 @@ client.on('groupMessage', async (message) => {
         const response = await fetch(message.body);
         const buffer = Buffer.from(await response.arrayBuffer());
 
+        // أ) التحقق من الكابتشا (الفخوخ)
         if (await isCaptchaByColor(buffer)) {
             if (Date.now() - lastCommandTime <= 4000) {
                 const name = await extractPlayerName(buffer);
@@ -104,7 +107,9 @@ client.on('groupMessage', async (message) => {
                     if (code) await client.messaging.sendGroupMessage(message.targetGroupId, `#${code}`);
                 }
             }
-        } else {
+        } 
+        // ب) تحديث الحالة
+        else {
             botState = await parseStatusImage(buffer);
             console.log("📊 تحديث الحالة:", botState);
         }
@@ -113,7 +118,8 @@ client.on('groupMessage', async (message) => {
     }
 });
 
-// الدوائر البرمجية
+// --- الدوال المساعدة ---
+
 async function isCaptchaByColor(buffer) {
     const { data, info } = await sharp(buffer).raw().ensureAlpha().toBuffer({ resolveWithObject: true });
     let redPixels = 0;
@@ -132,15 +138,12 @@ async function extractPlayerName(buffer) {
     return match ? match[1].trim() : "";
 }
 
-// حل الكابتشا باستخدام OCR
 async function solveCaptcha(buffer) {
-    const worker = await createWorker('eng'); // الأرقام عادة بالإنجليزية
-    // معالجة الصورة لتحسين قراءة الأرقام
+    const worker = await createWorker('eng');
     const processed = await sharp(buffer).greyscale().threshold(180).toBuffer();
     const { data: { text } } = await worker.recognize(processed);
     await worker.terminate();
     
-    // استخراج الأرقام فقط
     const digits = text.replace(/\D/g, ''); 
     return digits.length > 0 ? digits : null;
 }
