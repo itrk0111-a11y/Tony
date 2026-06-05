@@ -1,4 +1,4 @@
-Import 'dotenv/config';
+import 'dotenv/config';
 import wolfjs from 'wolf.js';
 import sharp from 'sharp';
 import { createWorker } from 'tesseract.js';
