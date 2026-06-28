@@ -11,7 +11,7 @@ const client = new WOLF();
 // --- الإعدادات ---
 const TARGET_USER_ID = 76023268;
 const CHANNEL_ID = 81671599;
-const ALLOWED_PLAYERS = ['Toney'];
+const ALLOWED_PLAYERS = ['Lus'];
 
 let globalTimer = 0;
 
